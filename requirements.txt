@@ -53,8 +53,11 @@ psycopg-pool==3.3.0
 #   传递依赖（openai/posthog/qdrant-client/sqlalchemy/pytz/protobuf 等）
 #   由 pip 自动解析安装，无需在此列举。
 #   可选：MEMORY_VECTOR_STORE=redis 后端需另装 redisvl（默认 chroma 不需要）。
+#   注意：redis 后端 mem0 search 自动启用 BM25+向量混合检索（无需额外代码）。
 # =========================================================
 mem0ai==2.2.1
+# redis 后端专用（MEMORY_VECTOR_STORE=redis 时必须；默认 chroma 不需要；0.28.0 依赖 redis==8.1.0）
+redisvl==0.28.0
 
 # =========================================================
 # LangChain 核心

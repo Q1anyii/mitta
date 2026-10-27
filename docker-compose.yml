@@ -49,6 +49,27 @@ services:
       timeout: 5s
       retries: 5
 
+  # ==================== Redis-Memory（Mem0 长期记忆专用，独立实例） ====================
+  # 与业务 redis 隔离：业务实例 maxmemory-policy=allkeys-lru（256MB），LRU 会逐出低频 key；
+  # mem0 记忆是不可重建的用户长期事实（对比缓存/登录态），必须独立实例 + noeviction，
+  # 否则记忆会被 LRU 静默逐出（数据丢失）。redis-stack 含 RedisSearch，mem0 redis 后端
+  # 的 search 会自动做 BM25+向量混合检索。
+  redis-memory:
+    image: redis/redis-stack:7.2.0-v10
+    container_name: mitta-redis-memory
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6380:6379"
+    volumes:
+      - redis_memory_data:/data
+    environment:
+      REDIS_ARGS: "--appendonly yes --maxmemory 256mb --maxmemory-policy noeviction"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # ==================== Milvus 三件套已停用（项目用 chroma 本地存储，1.6G 内存不跑 milvus）
   # etcd / minio / milvus 全部注释，需要时取消注释即可
   # ==================== 后端 API ====================
@@ -65,6 +86,10 @@ services:
     environment:
       POSTGRESQL_DB_URL: postgresql://${POSTGRES_USER:-root}:${POSTGRES_PASSWORD:?必须在 .env 设置 POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mitta}?sslmode=disable
       REDIS_DB_URL: redis://redis:6379/0
+      # Mem0 记忆后端：默认 chroma（本地文件库，零外部依赖）；
+      # 切 redis 时置 MEMORY_VECTOR_STORE=redis（独立 redis-memory 实例，noeviction 防驱逐）
+      MEMORY_VECTOR_STORE: ${MEMORY_VECTOR_STORE:-chroma}
+      MEMORY_REDIS_URL: ${MEMORY_REDIS_URL:-redis://redis-memory:6379/0}
       HUNYUAN_API_KEY: ${HUNYUAN_API_KEY}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
       SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY}
@@ -87,6 +112,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      redis-memory:
         condition: service_healthy
     volumes:
       - ./resources/config:/app/resources/config
@@ -116,6 +143,8 @@ volumes:
   postgres_data:
     driver: local
   redis_data:
+    driver: local
+  redis_memory_data:
     driver: local
   etcd_data:
     driver: local

@@ -30,6 +30,33 @@ _gate = threading.Lock()
 _singleton: Optional["MemoryService"] = None
 
 
+def _patch_mem0_redis_compat() -> None:
+    """桥接 mem0 2.2.1 与 redisvl 0.28.0 的 API 差异（仅 redis 后端需要）。
+
+    mem0 的 RedisDB 用旧 redisvl API：SearchIndex.from_dict(schema) + set_client(client)；
+    redisvl>=0.3 移除 set_client（改用构造参数 redis_client）。项目保持
+    redis==8.1.0 + redisvl 0.28.0（降 redis 会影响业务缓存/BM25/限流），
+    此处运行时补丁桥接：set_client 等价于在构造时注入 redis_client。
+    """
+    try:
+        from redisvl.index.index import SearchIndex
+    except ImportError:
+        return
+    if hasattr(SearchIndex, "set_client"):
+        return
+
+    def _set_client(self, client) -> None:
+        # name-mangled 私有属性（_SearchIndex__redis_client）为 redisvl 0.28.0
+        # 内部连接存储；_client_was_injected 标记外部注入、_owns_redis_client 关闭
+        # 自动关闭语义，与 __init__(redis_client=...) 行为一致。
+        object.__setattr__(self, "_SearchIndex__redis_client", client)
+        self._client_was_injected = True
+        self._owns_redis_client = False
+
+    SearchIndex.set_client = _set_client
+    logger.info("mem0 redis 兼容补丁已应用（SearchIndex.set_client）")
+
+
 def build_mem0_config() -> dict:
     """构造 mem0 配置（对齐 memory_config.py 的模型选型）。
 
@@ -49,10 +76,13 @@ def build_mem0_config() -> dict:
     backend = os.environ.get("MEMORY_VECTOR_STORE", "chroma").strip().lower()
 
     if backend == "redis":
+        _patch_mem0_redis_compat()
         vector_store = {
             "provider": "redis",
             "config": {
-                # 独立 db（默认 db=1）：避免与业务缓存/限流共享 db0 的 LRU 驱逐
+                # 独立实例（compose redis-memory，noeviction）：避免业务 redis 的
+                # allkeys-lru 驱逐记忆（不可重建）；同实例内 db 隔离不防 LRU（实例级），
+                # 故必须独立实例而非仅独立 db。
                 "redis_url": os.environ.get(
                     "MEMORY_REDIS_URL", os.environ.get("REDIS_DB_URL", "redis://localhost:6379/1")
                 ),
@@ -60,6 +90,8 @@ def build_mem0_config() -> dict:
                 "embedding_model_dims": 1024,  # bge-m3 维度
             },
         }
+        # 注：mem0 2.2.1 的 redis 后端，search 内部自动执行 BM25（keyword_search）
+        # + 向量混合检索，无需额外代码（见 mem0/memory/main.py _search_vector_store）
     else:
         vector_store = {
             "provider": "chroma",
@@ -143,7 +175,10 @@ class MemoryService:
     ) -> list[dict]:
         """检索记忆（按 user_id 隔离）。返回 [{"text","score","created_at"}]，score 降序。
 
-        reference_date 传入当前时间可启用 mem0 时间衰减加权（越新权重越高）。
+        redis 后端时 search 自动做 BM25+向量混合检索（mem0 内部实现）。
+        注意：reference_date（时间衰减加权）是 mem0 平台功能，OSS 版传参会抛
+        ValueError（已由内部 try/except 降级）——P5 时间加权需另想办法（如按
+        created_at 手动排序）。
         """
         m = self.memory
         if m is None:
