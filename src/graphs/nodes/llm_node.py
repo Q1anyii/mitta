@@ -34,6 +34,7 @@ def llm_node(
     tools: list[BaseTool],
     get_user_system_prompt,
     lazy_loader=None,
+    memory_service = None
 ) -> OverAllState:
     """核心生成节点：组装上下文 → 筛选工具 → LLM 生成 → 返回消息。"""
     logger.success("llm_node is runed")
@@ -69,6 +70,19 @@ def llm_node(
     user_id = config["configurable"].get("user_id", "default")
     username = _get_username(config)
     long_term = _ensure_username_profile(store, user_id, username)
+    # P3：mem0 检索式记忆（按需注入，mem0 未装/失败降级为空）
+    retrieved_memory = []
+    if memory_service is not None:
+        try:
+            retrieved_memory = memory_service.search(
+                query=input_str,
+                user_id=user_id,
+                top_k=5,
+                threshold=0.3,
+            ) or []
+        except Exception as e:
+            logger.warning(f"mem0 记忆检索降级（user_id={user_id}）：{e}")
+            retrieved_memory = []
 
     # ── 3. 短期记忆 ──
     history = _trim_history(list(state.get("messages", [])))
@@ -81,6 +95,10 @@ def llm_node(
     system_content += f"\n\n{persona['prompt']}"
     if long_term and long_term != "（暂无档案）":
         system_content += f"\n\n【用户长期记忆】\n{long_term}"
+    if retrieved_memory:
+        system_content += "\n\n【用户近期记忆】\n" + "\n".join(
+            f"- {m['text']}" for m in retrieved_memory
+        )
 
     messages = [SystemMessage(content=system_content)] + _repair_history(list(history))
     messages.append(HumanMessage(content=user_content))

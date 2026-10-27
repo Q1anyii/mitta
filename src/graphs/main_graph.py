@@ -132,7 +132,9 @@ def build_main_graph(
 
     # get_user_system_prompt 从 init 导入（纯函数，依赖 MySQL user_profile 表）
     from init import get_user_system_prompt
-
+    # mem0 记忆服务：进程内单例（懒加载；mem0 未安装/初始化失败返回 None，
+    # llm_node/memory_node 内部均已做 None 降级）
+    memory_service = get_memory_service()
     # ── 用 partial 绑定依赖，得到符合 LangGraph 节点签名 (state, config) -> state 的函数 ──
     # router_node：统一路由（一次 LLM 调用出 persona + need_retrieval），
     # 替代原 persona_router_node → classify_node 两步链路（H-20260919-11 任务C）
@@ -144,9 +146,8 @@ def build_main_graph(
         tool_filter=tool_filter, tools=tools,
         get_user_system_prompt=get_user_system_prompt,
         lazy_loader=lazy_loader,
+        memory_service = memory_service
     )
-    # mem0 记忆服务：进程内单例（懒加载；mem0 未安装/初始化失败返回 None，memory_node 内部降级）
-    memory_service = get_memory_service()
     memory_node_bound = partial(memory_node, memory_service=memory_service)
 
     # ── 图构建 ──

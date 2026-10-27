@@ -1,4 +1,4 @@
-# mem0 记忆写路径改造（P2）：store 全量合并 → mem0.add
+# mem0 记忆改造（P2 写路径 + P3 读路径）：store 全量合并 → mem0 增量入库 + 检索注入
 
 日期：2026-10-27
 docs_sync: required
@@ -49,9 +49,21 @@ P2 只动写路径：memory_node 不再做全量合并，改为把本轮对话�
     `[user, assistant]` 调 add；`_memory_cache_key` executed 轮确定性 key / idle 轮 nocache
 - Python 3.13（有 mem0）服务层 add 已在此前 P1 验证调通（本节点只包装调用）
 
+## P3 读路径（追加于同日）
+
+- `src/graphs/nodes/llm_node.py`：签名加 `memory_service=None`（默认降级）；`_ensure_username_profile`
+  后接 `memory_service.search(query=input_str, user_id=user_id, top_k=5, threshold=0.3)`，
+  结果拼 `【用户近期记忆】` 块注入 system prompt（与 `【用户长期记忆】` 并存）。
+- `src/graphs/main_graph.py`：`memory_service = get_memory_service()` 单例前移至 llm_node_bound
+  前，`llm_node` 与 `memory_node` 共用同一单例。
+- 设计：**两层记忆并存，非替代**——store（PG）稳定档案（用户名，每轮必带，低频写）
+  + mem0（向量库）高频事实（按需检索注入）。store 方案取消的仅是"每轮 LLM 全量合并写入"，
+  读路径与用户名低频写保留；长期事实增量来源移交 mem0。
+- 验证（conda，mock 依赖）：`mem_injected=True`（检索结果正确注入）、`none_ok=True`
+  （memory_service=None 降级不炸）；AST 通过。
+
 ## 遗留
 
-- P3 读路径未做：llm_node 注入 `memory_service.search(user_id, input_str)` 检索记忆
 - P4（redis 后端切换）、P5（生命周期参数）、P6（评测/灰度）未做
 - 过时注释待文档侧同步：`graphs/utils/per_user_lock.py`、`graphs/utils/user_profile.py`、
   `agent_test/eval_memory.py` 仍描述旧 store 合并语义
