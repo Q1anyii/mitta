@@ -47,6 +47,16 @@ psycopg[binary]==3.3.3
 psycopg-pool==3.3.0
 
 # =========================================================
+# 长期记忆（Mem0，P2 改造引入）
+# 实际使用：mem0(1文件) — service/memory_service.py 延迟导入，
+#   LLM 事实提取 + embedding 入库；mem0 缺失/初始化失败时主链路降级为无记忆。
+#   传递依赖（openai/posthog/qdrant-client/sqlalchemy/pytz/protobuf 等）
+#   由 pip 自动解析安装，无需在此列举。
+#   可选：MEMORY_VECTOR_STORE=redis 后端需另装 redisvl（默认 chroma 不需要）。
+# =========================================================
+mem0ai==2.2.1
+
+# =========================================================
 # LangChain 核心
 # 实际使用：
 #   langchain(init.py) — init_chat_model
