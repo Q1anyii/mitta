@@ -93,10 +93,35 @@ P2 只动写路径：memory_node 不再做全量合并，改为把本轮对话�
   docker daemon 未运行），全链路 add→search 实测待环境就绪（起 redis-memory 容器或
   提供可用 redis-stack 实例）。
 
-## 遗留
+## 遗留（明日待办，2026-10-28）
 
-- P5（生命周期/时间衰减，OSS 受限只能 created_at 手动）、P6（评测/灰度）未做
-- 过时注释待文档侧同步：`graphs/utils/per_user_lock.py`、`graphs/utils/user_profile.py`、
+### 待办 1：redis 后端全链路实测（P4 收尾）
+- 本地无可用 redis-stack（127.0.0.1:6379 握手失败非真 redis；docker daemon 未运行）。
+- 明天：启动 Docker Desktop → `docker compose up redis-memory`（或提供 redis-stack 实例）
+  → `MEMORY_VECTOR_STORE=redis` 跑 add→search→get_all 全链路，验证 set_client 补丁在
+  真实后端下工作正常（含 BM25 混合检索是否返回结果）。
+- 验证通过后 P4 才算真正闭环。
+
+### 待办 2：P5 生命周期参数（时间衰减 / 过期）
+- mem0 OSS 限制：`reference_date`（时间衰减加权）是平台功能，OSS search 传参直接抛
+  ValueError（已在 memory_service.search docstring 标注）。
+- 可行实现（自托管）：
+  ① 过期清理：add 时 `metadata=[{"expiration_date": "..."}]`（mem0 原生支持；
+     search 默认过滤过期，show_expired=True 可查）——先做这个。
+  ② 时间加权：按 `created_at` 手动排序/过滤（服务层 search 后处理）——reference_date
+     的替代品，弱版时间衰减。
+- 涉及文件：`src/service/memory_service.py`（search 排序/过滤）、`memory_node.py`（add
+  传 expiration_date 的取值逻辑，可能来自记忆类型/用户配置）。
+
+### 待办 3：P6 评测 / 灰度
+- `agent_test/eval_memory.py` 更新：旧 store 合并语义 → mem0 检索式（读取/断言对齐
+  P2/P3/P4 新实现）。
+- 全量评测脚本跑通并出报告。
+- 灰度：MEMORY_VECTOR_STORE 切换策略（chroma→redis 平滑切换：先 redis 并行验证，
+  再切默认值；降级路径已验证，切换风险可控）。
+
+### 已知遗留（无需动作，文档侧同步）
+- 过时注释待文档同步：`graphs/utils/per_user_lock.py`、`graphs/utils/user_profile.py`、
   `agent_test/eval_memory.py` 仍描述旧 store 合并语义
-- 提交记录：P1+P2（c4192a5）、requirements mem0ai（bb9c214）、P3（53acc91）；
-  P4 本次提交；均未推送
+- 提交记录：P1+P2（c4192a5）、requirements mem0ai（bb9c214）、P3（53acc91）、
+  P4（51ef376）；均未推送
