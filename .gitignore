@@ -124,6 +124,7 @@ resources/config/.vector_config_path
 
 # ---- Mitta 本地运行时数据（测试生成，不入库）----
 resources/chroma_data/
+resources/mem0_chroma/
 resources/local_data.db
 resources/chroma.sqlite3
 

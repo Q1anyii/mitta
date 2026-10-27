@@ -10,8 +10,8 @@
                                                           ↓              ↓
                                                          END         llm_node（循环）
 
-注：H-20260920-01 二轮方案——memory_node 保留在主图内（不拆分），但节点内部
-改为 fire-and-forget：长期记忆 LLM 提取 + store.put 放后台线程，节点立即返回，
+注：memory_node 保留在主图内，节点内部 fire-and-forget：长期记忆走 mem0
+（P2 改造：mem0.add 内部 LLM 事实提取 + embedding 入库）放后台线程，节点立即返回，
 不再阻塞 SSE 完成态。done 事件由 chat_service._run_graph 在 stream 结束后推送。
 """
 
@@ -62,6 +62,7 @@ from graphs.nodes.llm_node import llm_node
 from graphs.nodes.memory_node import memory_node, _memory_cache_key
 from graphs.routes import route, route_after_llm
 from constant.cache_constant import CACHE_MEMORY_NODE_TTL
+from service.memory_service import get_memory_service
 
 
 def _tool_error_message(e: Exception) -> str:
@@ -144,7 +145,9 @@ def build_main_graph(
         get_user_system_prompt=get_user_system_prompt,
         lazy_loader=lazy_loader,
     )
-    memory_node_bound = partial(memory_node, store=store, model=model)
+    # mem0 记忆服务：进程内单例（懒加载；mem0 未安装/初始化失败返回 None，memory_node 内部降级）
+    memory_service = get_memory_service()
+    memory_node_bound = partial(memory_node, memory_service=memory_service)
 
     # ── 图构建 ──
     builder = StateGraph(state_schema=OverAllState)
@@ -158,9 +161,8 @@ def build_main_graph(
     # 透传给 API 会双向 400（悬空调用 / 孤儿 ToolMessage）
     builder.add_node("tool_node", tool_node)
     # memory_node：仅 executed/unavailable 轮写入缓存（见 _memory_cache_key），
-    # 命中时跳过 LLM 记忆提取与 store 写入，省一次模型调用。
-    # H-20260920-01 二轮：节点内部已 fire-and-forget（LLM 提取放后台线程），
-    # 节点函数立即返回，SSE 完成态不被 1~3s 的提取阻塞。
+    # 命中时跳过节点执行（省一次 mem0 提取调用）。节点内部已 fire-and-forget
+    # （mem0.add 放后台线程），节点函数立即返回，SSE 完成态不被 1~3s 的提取阻塞。
     builder.add_node(
         "memory_node",
         memory_node_bound,
