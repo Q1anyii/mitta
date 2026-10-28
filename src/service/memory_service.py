@@ -17,6 +17,8 @@
 
 import os
 import threading
+import time
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -28,6 +30,20 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 _gate = threading.Lock()
 _singleton: Optional["MemoryService"] = None
+
+# ---- P5 生命周期/时间加权参数（可被环境变量覆盖）----
+# 默认记忆有效期（天）：过期后 search/get_all 自动隐藏（mem0 原生）。
+_DEFAULT_TTL_DAYS = 90
+# 时间衰减窗口（天）：created_at 距今越近，额外加分越高（0→满窗线性）。
+_RECENCY_WINDOW_DAYS = 30
+# 访问加权（LRU 语义）：距上次被检索越近，额外加分越高；窗口（天）。
+_ACCESS_WINDOW_DAYS = 7
+# 加分权重（相对 mem0 原始 score 0~1 的量级，不反转相关性排序）。
+_W_RECENCY = 0.15
+_W_ACCESS = 0.25
+# 访问计数在业务 redis 的 key 与保留期（丢了只损失加权，可重建，无碍）。
+_ACCESS_KEY_TPL = "mem0:access:{}"
+_ACCESS_TTL_SECONDS = _ACCESS_WINDOW_DAYS * 86400
 
 
 def _patch_mem0_redis_compat() -> None:
@@ -149,8 +165,17 @@ class MemoryService:
                 logger.error(f"mem0 初始化失败（降级为无记忆）: {e}")
         return self._memory
 
-    def add(self, user_id: str, messages: list[dict], metadata: Optional[dict] = None) -> bool:
+    def add(
+        self,
+        user_id: str,
+        messages: list[dict],
+        metadata: Optional[dict] = None,
+        expiration_days: Optional[int] = None,
+    ) -> bool:
         """写入记忆：mem0 内部完成 LLM 事实提取 + embedding 入库（异步无回调）。
+
+        生命周期：默认 MEMORY_TTL_DAYS（未设=90）天后过期（mem0 原生 expiration_date，
+        search/get_all 自动隐藏过期记忆）；传 expiration_days=0 或负数可显式关闭过期。
 
         messages: [{"role": "user"/"assistant", "content": ...}, ...]
         返回 True 表示已提交调用（mem0 内部成功与否无法同步确认，失败记日志）。
@@ -159,7 +184,15 @@ class MemoryService:
         if m is None:
             return False
         try:
-            m.add(messages, user_id=user_id, metadata=metadata)
+            if expiration_days is None:
+                try:
+                    expiration_days = int(os.environ.get("MEMORY_TTL_DAYS", _DEFAULT_TTL_DAYS))
+                except ValueError:
+                    expiration_days = _DEFAULT_TTL_DAYS
+            expiration_date = None
+            if expiration_days is not None and expiration_days > 0:
+                expiration_date = (date.today() + timedelta(days=expiration_days)).isoformat()
+            m.add(messages, user_id=user_id, metadata=metadata, expiration_date=expiration_date)
             return True
         except Exception as e:
             logger.error(f"mem0.add 失败 user_id={user_id}: {e}")
@@ -173,12 +206,14 @@ class MemoryService:
         threshold: Optional[float] = None,
         reference_date: Optional[str] = None,
     ) -> list[dict]:
-        """检索记忆（按 user_id 隔离）。返回 [{"text","score","created_at"}]，score 降序。
+        """检索记忆（按 user_id 隔离）。返回 [{"id","text","score","created_at"}]，
+        按加权分降序（score = mem0 原始分 + 时间衰减加分 + 访问加权加分）。
 
-        redis 后端时 search 自动做 BM25+向量混合检索（mem0 内部实现）。
-        注意：reference_date（时间衰减加权）是 mem0 平台功能，OSS 版传参会抛
-        ValueError（已由内部 try/except 降级）——P5 时间加权需另想办法（如按
-        created_at 手动排序）。
+        redis 后端时 mem0 search 自动做 BM25+向量混合检索。
+        时间衰减：created_at 距今 ≤30 天线性加分（越新越高）；
+        访问加权（LRU 语义）：被检索命中的记忆记录 last_access（业务 redis），
+        距上次访问越近加分越高（≤7 天窗口）——redis 不可用时自动降级为仅时间衰减。
+        reference_date（平台时间衰减）OSS 版不可用，传参会由 mem0 抛错并降级返回 []。
         """
         m = self.memory
         if m is None:
@@ -191,17 +226,99 @@ class MemoryService:
                 threshold=threshold or 0.1,
                 reference_date=reference_date,
             )
-            return [
+            items = [
                 {
+                    "id": r.get("id"),
                     "text": r.get("memory", ""),
                     "score": r.get("score", 0.0),
                     "created_at": r.get("created_at"),
                 }
                 for r in results.get("results", [])
             ]
+            return self._reweight(items, user_id)
         except Exception as e:
             logger.error(f"mem0.search 失败 user_id={user_id}: {e}")
             return []
+
+    def _redis_client(self):
+        """访问计数用业务 redis（REDIS_DB_URL）。不可用时返回 None（降级无访问加权）。
+
+        懒探测一次并缓存结果（None/False 表示不可用，避免每轮重连）。
+        """
+        if not hasattr(self, "_access_redis"):
+            self._access_redis = None
+            url = os.environ.get("REDIS_DB_URL", "redis://localhost:6379/0")
+            try:
+                import redis as redis_py
+
+                client = redis_py.Redis.from_url(
+                    url, socket_timeout=2, socket_connect_timeout=2, decode_responses=True
+                )
+                client.ping()
+                self._access_redis = client
+            except Exception as e:
+                logger.debug(f"记忆访问计数 redis 不可用（降级为仅时间衰减）: {e}")
+                self._access_redis = False
+        return self._access_redis if self._access_redis else None
+
+    def _reweight(self, items: list[dict], user_id: str) -> list[dict]:
+        """P5 手动时间加权：score = 原始分 + 时间衰减加分 + 访问加权（LRU）加分。
+
+        返回按加权分降序的新列表（score 字段为加权后分值，原分保留在 raw_score）。
+        """
+        if not items:
+            return []
+        now = time.time()
+        rc = self._redis_client()
+
+        # 读取本次命中记忆的 last_access
+        access_map: dict = {}
+        if rc:
+            try:
+                vals = rc.hmget(_ACCESS_KEY_TPL.format(user_id), [it.get("id") for it in items])
+                access_map = {
+                    it.get("id"): float(v)
+                    for it, v in zip(items, vals)
+                    if v and it.get("id")
+                }
+            except Exception:
+                access_map = {}
+
+        weighted = []
+        for it in items:
+            bonus = 0.0
+            ca = it.get("created_at")
+            if ca:
+                try:
+                    created = datetime.fromisoformat(ca)
+                    if created.tzinfo is None:
+                        created = created.replace(tzinfo=timezone.utc)
+                    age_days = (datetime.now(timezone.utc) - created).total_seconds() / 86400
+                    if 0 <= age_days <= _RECENCY_WINDOW_DAYS:
+                        bonus += _W_RECENCY * (1 - age_days / _RECENCY_WINDOW_DAYS)
+                except (ValueError, TypeError):
+                    pass
+            if access_map and it.get("id") in access_map:
+                ago_days = (now - access_map[it["id"]]) / 86400
+                if 0 <= ago_days <= _ACCESS_WINDOW_DAYS:
+                    bonus += _W_ACCESS * (1 - ago_days / _ACCESS_WINDOW_DAYS)
+            weighted.append({**it, "raw_score": it["score"], "score": round(it["score"] + bonus, 4)})
+
+        weighted.sort(key=lambda x: x["score"], reverse=True)
+
+        # fire-and-forget 记录本次命中记忆的访问时间（失败静默，丢失只损失加权）
+        if rc and items:
+            try:
+                pipe = rc.pipeline()
+                key = _ACCESS_KEY_TPL.format(user_id)
+                for it in items:
+                    if it.get("id"):
+                        pipe.hset(key, it["id"], now)
+                pipe.expire(key, _ACCESS_TTL_SECONDS)
+                pipe.execute()
+            except Exception:
+                pass
+        return weighted
 
     def get_all(self, user_id: str, top_k: int = 100) -> list[dict]:
         """列出该用户全部记忆（评测/排查用）。"""

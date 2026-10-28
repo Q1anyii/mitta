@@ -117,16 +117,20 @@ P2 只动写路径：memory_node 不再做全量合并，改为把本轮对话�
 ### 待办 1：redis 后端全链路实测 —— ✅ 已完成（见上"P4 实测"）
 - 实测通过（add/search/隔离/get_all 全绿），db 0 限制已修复并需提交。
 
-### 待办 2：P5 生命周期参数（时间衰减 / 过期）
-- mem0 OSS 限制：`reference_date`（时间衰减加权）是平台功能，OSS search 传参直接抛
-  ValueError（已在 memory_service.search docstring 标注）。
-- 可行实现（自托管）：
-  ① 过期清理：add 时 `metadata=[{"expiration_date": "..."}]`（mem0 原生支持；
-     search 默认过滤过期，show_expired=True 可查）——先做这个。
-  ② 时间加权：按 `created_at` 手动排序/过滤（服务层 search 后处理）——reference_date
-     的替代品，弱版时间衰减。
-- 涉及文件：`src/service/memory_service.py`（search 排序/过滤）、`memory_node.py`（add
-  传 expiration_date 的取值逻辑，可能来自记忆类型/用户配置）。
+### 待办 2：P5 生命周期参数 —— ✅ 已完成（2026-10-28）
+- 过期清理：mem0 `add` 原生支持 `expiration_date`（YYYY-MM-DD，search/get_all 自动隐藏
+  过期）。`memory_service.add` 新增 `expiration_days` 参数，默认 `MEMORY_TTL_DAYS`（未设=90），
+  传 0/负数显式关闭。
+- 手动时间加权（替代 OSS 不可用的 reference_date）：`search` 结果按
+  `加权分 = 原始分 + recency加分 + access加分(LRU)` 重排：
+  - recency：created_at 距今 ≤30 天线性加分（越新越高，权重 0.15）
+  - access：命中的记忆写 last_access 到业务 redis（`mem0:access:{user_id}` hash），
+    距上次访问 ≤7 天线性加分（权重 0.25）——用户"记忆被访问权重提高"的 LRU 语义；
+    redis 不可用自动降级为仅 recency。
+  - 结果保留 `raw_score` 与 `id`。
+- 验证（conda mock）：recency 加分精确（1天→0.145、15天→0.075、>30天→0）；
+  access 加分精确（刚访问→0.25）；排序按加权分；TTL 默认90/显式30/0关闭全对；
+  redis 不可用降级不炸；reference_date 默认不传。
 
 ### 待办 3：P6 评测 / 灰度
 - `agent_test/eval_memory.py` 更新：旧 store 合并语义 → mem0 检索式（读取/断言对齐
