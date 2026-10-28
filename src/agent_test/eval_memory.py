@@ -271,7 +271,7 @@ def test_search_latency(t: MemoryServiceTester, user_id: str, n: int, warmup: in
 def test_retrieval_quality(t: MemoryServiceTester, user_id: str) -> Dict:
     """【测试 3】检索质量：写入全部事实，按 query→预期类别断言命中率。
 
-    口径对齐生产（llm_node 注入：top_k=5, threshold=0.3）——top5 命中率即真实召回覆盖。
+    口径对齐生产（llm_node 注入：top_k=5, threshold=0.5）——top5 命中率即真实召回覆盖。
     """
     logger.info("【测试 3】检索质量（top1/top3/top5 命中率，threshold=0.5 对齐生产）")
     for cat, fact in FACT_POOL:
