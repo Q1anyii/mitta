@@ -93,14 +93,29 @@ P2 只动写路径：memory_node 不再做全量合并，改为把本轮对话�
   docker daemon 未运行），全链路 add→search 实测待环境就绪（起 redis-memory 容器或
   提供可用 redis-stack 实例）。
 
-## 遗留（明日待办，2026-10-28）
+## P4 实测（2026-10-28 追加）
 
-### 待办 1：redis 后端全链路实测（P4 收尾）
-- 本地无可用 redis-stack（127.0.0.1:6379 握手失败非真 redis；docker daemon 未运行）。
-- 明天：启动 Docker Desktop → `docker compose up redis-memory`（或提供 redis-stack 实例）
-  → `MEMORY_VECTOR_STORE=redis` 跑 add→search→get_all 全链路，验证 set_client 补丁在
-  真实后端下工作正常（含 BM25 混合检索是否返回结果）。
-- 验证通过后 P4 才算真正闭环。
+- **环境打通**：WSL（Ubuntu）里跑着 Sorts 项目的 docker 容器，6379 是
+  `sorts-redis`（redis/redis-stack-server，host 网络，`REDIS_ARGS=--requirepass sorts_dev
+  --appendonly yes`，**无 maxmemory/LRU**）。Windows 侧经 WSL2 localhost 转发
+  `redis://:sorts_dev@127.0.0.1:6379/0` 连接成功，FT._LIST 确认 RediSearch 可用。
+- **实测发现的关键限制：RediSearch FT 索引只能在 db 0 创建**（`Cannot create index on
+  db != 0`）。P1 默认值 `redis://localhost:6379/1` 是错的——已修为默认 db 0；
+  隔离只能靠独立实例（compose `redis://redis-memory:6379/0` 恰好正确），
+  "独立 db 不防 LRU"的结论升级为"独立 db 直接建不了索引"。
+- **全链路实测通过**（Python 3.13 + 真实 DeepSeek/SiliconFlow key + sorts 6379 db 0）：
+  - add ×4 全 True（首次 92s 含建索引+LLM 事实提取+embedding，后续 ~1.5s）
+  - search 精准命中：名字 0.67 / 跑步 0.58 / 技术栈 0.63——**BM25+向量混合检索生效**
+  - 用户隔离正确：u2 检索只返回 u2 记忆，u1 无泄漏
+  - get_all 完整取回；mem0 2.2.1 初始化、set_client 补丁在真实后端工作正常
+  - 实测数据已清理（mem0 reset + drop index，Sorts redis 恢复原状 ft_list=[]）
+- 备注：add 首次慢（92s）是建索引 + LLM 提取 + embedding 串行；生产每次新用户首轮
+  也会有此成本，后续轮次 ~1.5s 可接受。spaCy 未装不影响（BM25 lemmatize 有 fallback）。
+
+## 遗留（今日待办，2026-10-28）
+
+### 待办 1：redis 后端全链路实测 —— ✅ 已完成（见上"P4 实测"）
+- 实测通过（add/search/隔离/get_all 全绿），db 0 限制已修复并需提交。
 
 ### 待办 2：P5 生命周期参数（时间衰减 / 过期）
 - mem0 OSS 限制：`reference_date`（时间衰减加权）是平台功能，OSS search 传参直接抛

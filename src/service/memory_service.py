@@ -80,11 +80,11 @@ def build_mem0_config() -> dict:
         vector_store = {
             "provider": "redis",
             "config": {
-                # 独立实例（compose redis-memory，noeviction）：避免业务 redis 的
-                # allkeys-lru 驱逐记忆（不可重建）；同实例内 db 隔离不防 LRU（实例级），
-                # 故必须独立实例而非仅独立 db。
+                # RediSearch FT 索引只能在 db 0 创建（实测：Cannot create index on db != 0），
+                # 隔离不能靠独立 db，必须独立实例（compose redis-memory，noeviction 防驱逐，
+                # 避免业务 redis 的 allkeys-lru 驱逐记忆；默认 db 0）。
                 "redis_url": os.environ.get(
-                    "MEMORY_REDIS_URL", os.environ.get("REDIS_DB_URL", "redis://localhost:6379/1")
+                    "MEMORY_REDIS_URL", os.environ.get("REDIS_DB_URL", "redis://localhost:6379/0")
                 ),
                 "collection_name": os.environ.get("MEMORY_COLLECTION", "mem0"),
                 "embedding_model_dims": 1024,  # bge-m3 维度
