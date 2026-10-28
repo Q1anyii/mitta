@@ -45,6 +45,20 @@ _W_ACCESS = 0.25
 _ACCESS_KEY_TPL = "mem0:access:{}"
 _ACCESS_TTL_SECONDS = _ACCESS_WINDOW_DAYS * 86400
 
+# 记忆提取 prompt：mem0 默认 FACT_RETRIEVAL_PROMPT 虽带 "record in the same language"，
+# 实测 DeepSeek 仍把中文事实翻译成英文，导致中文 query 检索时 BM25 失配、向量跨语言
+# 损耗（P6 评测 3/10 miss 的根因）。覆盖为强制保留原文语言。
+# 格式契约必须保持 mem0 要求的 {"facts": [...]} JSON。
+_DEFAULT_EXTRACT_PROMPT = """你是个人信息整理助手，负责从对话中提取关于用户的长期事实与偏好。
+
+要求：
+1. 用与用户消息完全相同的语言记录事实（用户用中文就记录中文，保留中文专名、地名、数值与术语，不要翻译成英文）。
+2. 每条事实独立、简洁、可作为一条检索记忆直接使用。
+3. 只提取关于用户的稳定长期信息（偏好、技能、项目、位置、习惯、目标等），忽略闲聊与无信息量内容；无相关信息时返回空列表。
+4. 只输出 JSON：{"facts": ["事实1", "事实2"]}，不要输出任何其他文字。
+
+对话如下："""
+
 
 def _patch_mem0_redis_compat() -> None:
     """桥接 mem0 2.2.1 与 redisvl 0.28.0 的 API 差异（仅 redis 后端需要）。
@@ -171,11 +185,15 @@ class MemoryService:
         messages: list[dict],
         metadata: Optional[dict] = None,
         expiration_days: Optional[int] = None,
+        prompt: Optional[str] = None,
     ) -> bool:
         """写入记忆：mem0 内部完成 LLM 事实提取 + embedding 入库（异步无回调）。
 
         生命周期：默认 MEMORY_TTL_DAYS（未设=90）天后过期（mem0 原生 expiration_date，
         search/get_all 自动隐藏过期记忆）；传 expiration_days=0 或负数可显式关闭过期。
+
+        提取语言：默认用 _DEFAULT_EXTRACT_PROMPT（强制保留原文语言，避免中文事实被
+        翻译成英文导致检索失配）；调用方可传 prompt 覆盖。
 
         messages: [{"role": "user"/"assistant", "content": ...}, ...]
         返回 True 表示已提交调用（mem0 内部成功与否无法同步确认，失败记日志）。
@@ -192,7 +210,13 @@ class MemoryService:
             expiration_date = None
             if expiration_days is not None and expiration_days > 0:
                 expiration_date = (date.today() + timedelta(days=expiration_days)).isoformat()
-            m.add(messages, user_id=user_id, metadata=metadata, expiration_date=expiration_date)
+            m.add(
+                messages,
+                user_id=user_id,
+                metadata=metadata,
+                expiration_date=expiration_date,
+                prompt=prompt or _DEFAULT_EXTRACT_PROMPT,
+            )
             return True
         except Exception as e:
             logger.error(f"mem0.add 失败 user_id={user_id}: {e}")
@@ -232,6 +256,7 @@ class MemoryService:
                     "text": r.get("memory", ""),
                     "score": r.get("score", 0.0),
                     "created_at": r.get("created_at"),
+                    "metadata": r.get("metadata") or {},
                 }
                 for r in results.get("results", [])
             ]

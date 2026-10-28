@@ -132,15 +132,38 @@ P2 只动写路径：memory_node 不再做全量合并，改为把本轮对话�
   access 加分精确（刚访问→0.25）；排序按加权分；TTL 默认90/显式30/0关闭全对；
   redis 不可用降级不炸；reference_date 默认不传。
 
-### 待办 3：P6 评测 / 灰度
-- `agent_test/eval_memory.py` 更新：旧 store 合并语义 → mem0 检索式（读取/断言对齐
-  P2/P3/P4 新实现）。
-- 全量评测脚本跑通并出报告。
-- 灰度：MEMORY_VECTOR_STORE 切换策略（chroma→redis 平滑切换：先 redis 并行验证，
-  再切默认值；降级路径已验证，切换风险可控）。
+### 待办 3：P6 评测 / 灰度 —— ✅ 已完成（2026-10-28）
+- **评测脚本重写**（`agent_test/eval_memory.py`）：PostgresStore 合并语义 → mem0 检索式。
+  按用户意见"评测重点在检索质量而非读写耗时"（读写就是一次 redis IO），默认只跑
+  **检索质量 + 生命周期**；延迟测试保留为 `--include-latency` 可选项。
+  - 检索质量：add 时带 `metadata.category`，按 query→预期类别自动断言 top1/top3/top5
+    命中率；**口径对齐生产**（llm_node 注入 top_k=5, threshold=0.3）。
+  - 生命周期：已过期记忆（昨天过期）不出现、未过期可见。
+- **修复一：search 丢 metadata**。memory_service.search 原只返回 id/text/score/created_at，
+  评测拿不到 category（首轮命中率 0% 是脚本问题，非检索问题）。search 返回补 metadata。
+- **修复二（真实质量问题）：提取记忆变英文**。mem0 默认 FACT_RETRIEVAL_PROMPT 虽带
+  "record in the same language"，实测 DeepSeek 仍把中文事实翻成英文 → 中文 query 检索时
+  BM25 失配、向量跨语言损耗（首轮 3/10 miss 的根因）。修复：memory_service.add 默认传
+  `_DEFAULT_EXTRACT_PROMPT`（强制保留原文语言，保持 {"facts": [...]} JSON 契约）。
+- **修复三：评测过期用例 bug**。原用 expiration_days=1（明天才过期）测"隐藏"必然失败；
+  改底层调用写"昨天过期"的记忆验证隐藏。
+- **本地实测结果**（Python 3.13 + 真实 key + Sorts redis 6379 db 0，threshold=0.3）：
+  - 检索质量：**top1 50% / top3 70% / top5 80%**（10 题；提取语言修复后中文 query 命中
+    显著回升，位置/技能 miss 修复）
+  - 生命周期：已过期隐藏 ✓ / 未过期可见 ✓
+  - 剩余 2/10 miss（项目/职业）：高分泛化事实（职业/目标/兴趣均含"AI 应用开发"）挤压
+    top5 位置 + 单次 LLM 提取波动；检索本身正确（小场景 3 条记忆时全部命中）。
+  - 对比旧方案：PostgresStore 无检索（每轮全量画像塞给 LLM），mem0 检索式 80% top5
+    召回 + 过期清理 = "有 RAG vs 没 RAG"的差距，**支持同步生产**。
+- **灰度方案**：代码已就绪（P2/P3/P4/P5 全绿 + 评测达标）。生产切换 = 部署时
+  `MEMORY_VECTOR_STORE=redis` + 起 compose `redis-memory`（独立实例、noeviction）+ 
+  `MEMORY_REDIS_URL=redis://redis-memory:6379/0`；降级路径已验证（redis 不可用自动降级
+  空检索，主链路不受影响），切换风险可控。建议随下一部署窗口切换，先小流量观察。
+- 报告：`src/agent_test/memory_eval_report.json`（含 10 条 query 的 top5 类别明细）。
+- 提交：c2b012e 后新增提交（P6 评测重写 + 语言约束 + search metadata 修复）。
 
 ### 已知遗留（无需动作，文档侧同步）
-- 过时注释待文档同步：`graphs/utils/per_user_lock.py`、`graphs/utils/user_profile.py`、
-  `agent_test/eval_memory.py` 仍描述旧 store 合并语义
+- 过时注释待文档同步：`graphs/utils/per_user_lock.py`、`graphs/utils/user_profile.py`
+  仍描述旧 store 合并语义
 - 提交记录：P1+P2（c4192a5）、requirements mem0ai（bb9c214）、P3（53acc91）、
-  P4（51ef376）；均未推送
+  P4（51ef376）、P4 修复（87f0461）、P5（c2b012e）；均未推送

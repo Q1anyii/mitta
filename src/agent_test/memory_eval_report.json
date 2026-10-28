@@ -1,120 +1,166 @@
 [
   {
-    "agent_test": "write_latency",
-    "count_per_run": 80,
-    "warmup": 10,
-    "repeat": 3,
-    "runs": [
+    "agent_test": "retrieval_quality",
+    "threshold": 0.3,
+    "cases": 10,
+    "top1_hit_rate": 0.5,
+    "top3_hit_rate": 0.7,
+    "top5_hit_rate": 0.8,
+    "details": [
       {
-        "avg_ms": 24.472654999988208,
-        "p50_ms": 24.37974999998005,
-        "p95_ms": 30.165510000028917,
-        "max_ms": 37.42160000001604,
-        "min_ms": 19.578099999762344
+        "query": "用户的目标岗位是什么方向？",
+        "expect_category": "目标",
+        "top5_categories": [
+          "目标",
+          "技能",
+          "兴趣",
+          "位置",
+          "偏好"
+        ],
+        "top1_hit": true,
+        "top3_hit": true,
+        "top5_hit": true
       },
       {
-        "avg_ms": 23.258141250045128,
-        "p50_ms": 23.798349999879065,
-        "p95_ms": 27.16320999998061,
-        "max_ms": 28.45580000030168,
-        "min_ms": 19.02090000021417
+        "query": "用户在哪个城市？",
+        "expect_category": "位置",
+        "top5_categories": [
+          "位置",
+          "技能",
+          "目标",
+          "兴趣",
+          "学习"
+        ],
+        "top1_hit": true,
+        "top3_hit": true,
+        "top5_hit": true
       },
       {
-        "avg_ms": 23.34781874999976,
-        "p50_ms": 23.606250000057116,
-        "p95_ms": 28.003174999730618,
-        "max_ms": 30.314300000100047,
-        "min_ms": 19.468899999992573
+        "query": "用户熟悉哪些技术栈？",
+        "expect_category": "技能",
+        "top5_categories": [
+          "学习",
+          "偏好",
+          "技能",
+          "技能",
+          "项目"
+        ],
+        "top1_hit": false,
+        "top3_hit": true,
+        "top5_hit": true
+      },
+      {
+        "query": "用户做过什么项目？",
+        "expect_category": "项目",
+        "top5_categories": [
+          "位置",
+          "技能",
+          "学习",
+          "目标",
+          "工具"
+        ],
+        "top1_hit": false,
+        "top3_hit": false,
+        "top5_hit": false
+      },
+      {
+        "query": "用户对什么感兴趣？",
+        "expect_category": "兴趣",
+        "top5_categories": [
+          "兴趣",
+          "偏好",
+          "目标",
+          "技能",
+          "位置"
+        ],
+        "top1_hit": true,
+        "top3_hit": true,
+        "top5_hit": true
+      },
+      {
+        "query": "用户用什么工具部署？",
+        "expect_category": "工具",
+        "top5_categories": [
+          "工具",
+          "目标",
+          "学习",
+          "位置",
+          "工具"
+        ],
+        "top1_hit": true,
+        "top3_hit": true,
+        "top5_hit": true
+      },
+      {
+        "query": "用户的学习方向？",
+        "expect_category": "学习",
+        "top5_categories": [
+          "技能",
+          "目标",
+          "学习",
+          "位置",
+          "偏好"
+        ],
+        "top1_hit": false,
+        "top3_hit": true,
+        "top5_hit": true
+      },
+      {
+        "query": "用户的职业背景？",
+        "expect_category": "职业",
+        "top5_categories": [
+          "位置",
+          "目标",
+          "技能",
+          "兴趣",
+          "技能"
+        ],
+        "top1_hit": false,
+        "top3_hit": false,
+        "top5_hit": false
+      },
+      {
+        "query": "用户有什么使用偏好？",
+        "expect_category": "偏好",
+        "top5_categories": [
+          "偏好",
+          "兴趣",
+          "位置",
+          "目标",
+          "偏好"
+        ],
+        "top1_hit": true,
+        "top3_hit": true,
+        "top5_hit": true
+      },
+      {
+        "query": "用户的开发习惯？",
+        "expect_category": "习惯",
+        "top5_categories": [
+          "偏好",
+          "偏好",
+          "目标",
+          "兴趣",
+          "习惯"
+        ],
+        "top1_hit": false,
+        "top3_hit": false,
+        "top5_hit": true
       }
-    ],
-    "avg_ms": 23.34781874999976,
-    "p50_ms": 23.798349999879065,
-    "p95_ms": 28.003174999730618,
-    "max_ms": 30.314300000100047,
-    "min_ms": 19.468899999992573
+    ]
   },
   {
-    "agent_test": "read_latency",
-    "count_per_run": 300,
-    "warmup": 10,
-    "repeat": 3,
-    "runs": [
-      {
-        "avg_ms": 44.32965466666095,
-        "p50_ms": 45.87554999989152,
-        "p95_ms": 51.690710000070794,
-        "max_ms": 61.64999999964493,
-        "min_ms": 36.51679999984481
-      },
-      {
-        "avg_ms": 44.577585333324045,
-        "p50_ms": 46.26139999982115,
-        "p95_ms": 51.86546500008262,
-        "max_ms": 80.06239999986065,
-        "min_ms": 36.690899999939575
-      },
-      {
-        "avg_ms": 45.65735233334484,
-        "p50_ms": 46.62640000015017,
-        "p95_ms": 56.13053000038236,
-        "max_ms": 70.064800000182,
-        "min_ms": 36.35699999995268
-      }
-    ],
-    "avg_ms": 44.577585333324045,
-    "p50_ms": 46.26139999982115,
-    "p95_ms": 51.86546500008262,
-    "max_ms": 70.064800000182,
-    "min_ms": 36.51679999984481
+    "agent_test": "expiration",
+    "expired_hidden": true,
+    "keep_visible": true,
+    "top_results": [
+      "用户偏好深色主题界面，并重视代码可读性",
+      "用户长期偏好喜欢喝拿铁咖啡",
+      "用户对 AI 产品化以及 Agent 的落地场景感兴趣"
+    ]
   },
   {
-    "agent_test": "duplicate_write_reduction",
-    "first_round": {
-      "writes": 3,
-      "skips": 0
-    },
-    "second_round": {
-      "writes": 0,
-      "skips": 3
-    },
-    "third_round": {
-      "writes": 2,
-      "skips": 2
-    },
-    "total_writes": 5,
-    "total_skips": 5,
-    "reduction_rate": 0.5
-  },
-  {
-    "agent_test": "conversation_profile",
-    "rounds": 10,
-    "final_entry_count": 10,
-    "entry_growth": [
-      1,
-      2,
-      3,
-      4,
-      5,
-      6,
-      7,
-      8,
-      9,
-      10
-    ],
-    "write": {
-      "avg_ms": 21.167549999881885,
-      "p50_ms": 20.887949999632838,
-      "p95_ms": 23.789774999818295,
-      "max_ms": 25.160700000014913,
-      "min_ms": 19.616399999904388
-    },
-    "read": {
-      "avg_ms": 44.821360000014465,
-      "p50_ms": 44.39415000001645,
-      "p95_ms": 52.535060000150224,
-      "max_ms": 54.286100000354054,
-      "min_ms": 39.04699999975492
-    },
-    "total_write_time_ms": 211.67549999881885
+    "agent_test": "meta",
+    "degraded": false
   }
 ]
