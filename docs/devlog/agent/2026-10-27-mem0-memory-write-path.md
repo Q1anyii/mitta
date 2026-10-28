@@ -167,3 +167,55 @@ P2 只动写路径：memory_node 不再做全量合并，改为把本轮对话�
   仍描述旧 store 合并语义
 - 提交记录：P1+P2（c4192a5）、requirements mem0ai（bb9c214）、P3（53acc91）、
   P4（51ef376）、P4 修复（87f0461）、P5（c2b012e）；均未推送
+
+## P6 复测：threshold 0.5 + 乘法衰减试水（2026-10-28 追加）
+
+背景：用户质疑 threshold=0.3 太低会混入噪音——长期记忆需兼顾时间/场景而非单一语义。
+查源码确认 threshold 门控语义：`mem0/utils/scoring.py::score_and_rank`（111 行）
+`if semantic_score < threshold: continue`——**门控的是纯向量相似度**（redis 后端
+= max(0, 1-vector_distance)），低于阈值直接排除，即使 BM25/entity 抬不了；
+过门后 `final = (semantic + bm25_normalized + entity_boost) / max_possible`（1.0/2.0/2.5/1.5）。
+
+### 改动一：threshold 0.3 → 0.5（llm_node.py 检索注入处）
+- 依据：P4 实测命中分数普遍 0.5~0.7，0.3 留下大量"勉强沾边"噪音空间。
+
+### 改动二：时间加权加分 → 乘法衰减（memory_service._reweight，env 可切换）
+- `MEMORY_REWEIGHT` 环境变量：默认 `mult`（试水），`add` 回退原加分。
+- **add（原版）**：score = 原始分 + recency(≤30天,0.15) + access(≤7天,0.25) ——
+  永远不反转语义主序（时间只是微调）。
+- **mult（乘法衰减，时间成为重排主力）**：
+  - recency_signal = max(0, 1 - age_days/30) ∈ [0,1]
+  - access_signal  = max(0, 1 - ago_days/7)（无访问记录=0）∈ [0,1]
+  - freshness = (recency_signal + access_signal) / 2
+  - time_factor = 1 + _W_TIME × (freshness - 0.5)，_W_TIME=0.8 → [0.6, 1.4]
+  - score = 原始分 × time_factor
+  - 新近刚访问的记忆放大 ×1.4，久未访问的旧记忆压低 ×0.6——**可反转语义主序**。
+
+### 评测对比（Python 3.13 + Sorts redis 6379 db 0，threshold=0.5）
+- add 基准：**top1 40% / top3 80% / top5 100%**（10/10 全部命中）——比 0.3 时的
+  top5 80% 更好（收紧语义门排掉噪音，正确类别挤进 top5）。
+- mult 对比：**top1 40% / top3 80% / top5 100%**，排名仅微调——批量同时 add 的
+  数据时间无差异，测不出 mult 差异（盲区）。
+- **针对性验证（排序反转）**：旧高分（40 天前 0.85）vs 新低分（1 天前 0.55）：
+  - add：old 0.85 保持最前（语义主序）
+  - mult：old 0.85×0.6=0.51 被压到末位，新记忆 0.55×0.987=0.54 排前——**实现
+    "时间成为重排主力"**，正中用户"过时但语义强的记忆混入"的担忧。
+- 判定：**保留 mult 为默认**（检索质量不降 + 时间分层符合预期）；回退路径
+  `MEMORY_REWEIGHT=add` 已保留。评测脚本 threshold/报告口径同步 0.5/mult。
+- 报告：`src/agent_test/memory_eval_report.json`（reweight_mode=mult, threshold=0.5）。
+
+### mem0 记忆更新机制查证（源码级，回答用户提问）
+- **add 是 ADD-only**：`generate_additive_extraction_prompt`（prompts.py 1016 行 docstring）
+  明写 "produce only ADD operations"。流程：Phase1 检索现有记忆 top10 → Phase2 LLM
+  提取 → Phase3-5 embed + `hash=md5(text)` 去重（main.py 1022-1025，重复跳过）→
+  Phase6 批量插入（全部 event=ADD）→ Phase7 实体链接。
+- **OSS 无自动 update/delete**：四操作（add/update/delete/no-change）prompt（prompts.py 177 行）
+  属于旧版 USER_MEMORY_EXTRACTION_PROMPT；2.2.1 的 add 不执行 LLM 输出的 update/delete。
+  `Memory.update(memory_id, text)` / `delete(memory_id)` 是显式 API，需调用方拿 id 主动调。
+- **Mitta 当前实际**：同主题新信息只会**叠加新记忆**，旧记忆原样保留、不自动改写；
+  重复文本靠 hash 去重挡住。"过时记忆"靠有效期隐藏 + 检索加权，而非主动更新。
+  迭代方向（未做）：需"冲突更新"时在 memory_node 对高相似命中显式调 update。
+- **阈值语义备忘**：诊断中的 1.089 是 P5 加权后分（raw≤1 + recency/access 加分），
+  不是 mem0 原始分（mem0 score_and_rank 输出被 min 到 ≤1）。
+- 提交：485b0d4（P6 初版）后新增提交（threshold 0.5 + mult 乘法衰减 + 评测口径同步）。
+

@@ -273,14 +273,14 @@ def test_retrieval_quality(t: MemoryServiceTester, user_id: str) -> Dict:
 
     口径对齐生产（llm_node 注入：top_k=5, threshold=0.3）——top5 命中率即真实召回覆盖。
     """
-    logger.info("【测试 3】检索质量（top1/top3/top5 命中率，threshold=0.3 对齐生产）")
+    logger.info("【测试 3】检索质量（top1/top3/top5 命中率，threshold=0.5 对齐生产）")
     for cat, fact in FACT_POOL:
         t.add(user_id, fact_messages(cat, fact), metadata={"category": cat})
 
     cases = []
     top1_hits = top3_hits = top5_hits = total = 0
     for query, expect_cat in RETRIEVAL_QUERIES:
-        _, results = t.search(user_id, query, top_k=5, threshold=0.3)
+        _, results = t.search(user_id, query, top_k=5, threshold=0.5)
         cats = [r.get("metadata", {}).get("category", "") if isinstance(r.get("metadata"), dict) else ""
                 for r in results]
         top1_hit = bool(cats) and cats[0] == expect_cat
@@ -302,7 +302,8 @@ def test_retrieval_quality(t: MemoryServiceTester, user_id: str) -> Dict:
 
     result = {
         "agent_test": "retrieval_quality",
-        "threshold": 0.3,
+        "threshold": 0.5,
+        "reweight_mode": os.environ.get("MEMORY_REWEIGHT", "mult"),
         "cases": total,
         "top1_hit_rate": round(top1_hits / total, 3),
         "top3_hit_rate": round(top3_hits / total, 3),

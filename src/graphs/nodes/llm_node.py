@@ -78,7 +78,7 @@ def llm_node(
                 query=input_str,
                 user_id=user_id,
                 top_k=5,
-                threshold=0.3,
+                threshold=0.5,
             ) or []
         except Exception as e:
             logger.warning(f"mem0 记忆检索降级（user_id={user_id}）：{e}")

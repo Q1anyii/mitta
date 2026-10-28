@@ -41,6 +41,9 @@ _ACCESS_WINDOW_DAYS = 7
 # 加分权重（相对 mem0 原始 score 0~1 的量级，不反转相关性排序）。
 _W_RECENCY = 0.15
 _W_ACCESS = 0.25
+# 乘法衰减强度（MEMORY_REWEIGHT=mult 时生效）：time_factor ∈ [1-W_TIME/2, 1+W_TIME/2]，
+# 默认 0.8 → [0.6, 1.4]。越大时间越能反转语义主序；效果不好回退 add 模式。
+_W_TIME = 0.8
 # 访问计数在业务 redis 的 key 与保留期（丢了只损失加权，可重建，无碍）。
 _ACCESS_KEY_TPL = "mem0:access:{}"
 _ACCESS_TTL_SECONDS = _ACCESS_WINDOW_DAYS * 86400
@@ -287,7 +290,17 @@ class MemoryService:
         return self._access_redis if self._access_redis else None
 
     def _reweight(self, items: list[dict], user_id: str) -> list[dict]:
-        """P5 手动时间加权：score = 原始分 + 时间衰减加分 + 访问加权（LRU）加分。
+        """P5 手动时间加权：按 MEMORY_REWEIGHT 模式重排（默认 mult 乘法衰减试水）。
+
+        - add（原版，可回退）：score = 原始分 + recency加分 + access加分（微调，不反转主序）
+        - mult（乘法衰减，时间成为重排主力）：
+            recency_signal = max(0, 1 - age_days/30)          ∈ [0,1]
+            access_signal  = max(0, 1 - ago_days/7)（无记录=0）∈ [0,1]
+            freshness      = (recency_signal + access_signal) / 2
+            time_factor    = 1 + _W_TIME * (freshness - 0.5)   ∈ [0.6, 1.4]
+            score          = 原始分 * time_factor
+          新近刚访问的记忆放大（×1.4），久未访问的旧记忆压低（×0.6），
+          可反转语义主序——这是与 add 模式的本质差异（效果不好回退 add）。
 
         返回按加权分降序的新列表（score 字段为加权后分值，原分保留在 raw_score）。
         """
@@ -309,10 +322,12 @@ class MemoryService:
             except Exception:
                 access_map = {}
 
+        mode = os.environ.get("MEMORY_REWEIGHT", "mult").strip().lower()
         weighted = []
         for it in items:
-            bonus = 0.0
+            raw = it["score"]
             ca = it.get("created_at")
+            recency_signal = 0.0
             if ca:
                 try:
                     created = datetime.fromisoformat(ca)
@@ -320,14 +335,23 @@ class MemoryService:
                         created = created.replace(tzinfo=timezone.utc)
                     age_days = (datetime.now(timezone.utc) - created).total_seconds() / 86400
                     if 0 <= age_days <= _RECENCY_WINDOW_DAYS:
-                        bonus += _W_RECENCY * (1 - age_days / _RECENCY_WINDOW_DAYS)
+                        recency_signal = 1 - age_days / _RECENCY_WINDOW_DAYS
                 except (ValueError, TypeError):
                     pass
+            access_signal = 0.0
             if access_map and it.get("id") in access_map:
                 ago_days = (now - access_map[it["id"]]) / 86400
                 if 0 <= ago_days <= _ACCESS_WINDOW_DAYS:
-                    bonus += _W_ACCESS * (1 - ago_days / _ACCESS_WINDOW_DAYS)
-            weighted.append({**it, "raw_score": it["score"], "score": round(it["score"] + bonus, 4)})
+                    access_signal = 1 - ago_days / _ACCESS_WINDOW_DAYS
+
+            if mode == "add":
+                bonus = _W_RECENCY * recency_signal + _W_ACCESS * access_signal
+                score = raw + bonus
+            else:  # mult（乘法衰减）
+                freshness = (recency_signal + access_signal) / 2
+                time_factor = 1 + _W_TIME * (freshness - 0.5)
+                score = raw * time_factor
+            weighted.append({**it, "raw_score": raw, "score": round(score, 4)})
 
         weighted.sort(key=lambda x: x["score"], reverse=True)
 

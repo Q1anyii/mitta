@@ -1,19 +1,20 @@
 [
   {
     "agent_test": "retrieval_quality",
-    "threshold": 0.3,
+    "threshold": 0.5,
+    "reweight_mode": "mult",
     "cases": 10,
-    "top1_hit_rate": 0.5,
-    "top3_hit_rate": 0.7,
-    "top5_hit_rate": 0.8,
+    "top1_hit_rate": 0.4,
+    "top3_hit_rate": 0.8,
+    "top5_hit_rate": 1.0,
     "details": [
       {
         "query": "用户的目标岗位是什么方向？",
         "expect_category": "目标",
         "top5_categories": [
           "目标",
-          "技能",
           "兴趣",
+          "职业",
           "位置",
           "偏好"
         ],
@@ -26,9 +27,9 @@
         "expect_category": "位置",
         "top5_categories": [
           "位置",
-          "技能",
-          "目标",
+          "职业",
           "兴趣",
+          "目标",
           "学习"
         ],
         "top1_hit": true,
@@ -54,14 +55,14 @@
         "expect_category": "项目",
         "top5_categories": [
           "位置",
-          "技能",
-          "学习",
-          "目标",
-          "工具"
+          "职业",
+          "项目",
+          "兴趣",
+          "学习"
         ],
         "top1_hit": false,
-        "top3_hit": false,
-        "top5_hit": false
+        "top3_hit": true,
+        "top5_hit": true
       },
       {
         "query": "用户对什么感兴趣？",
@@ -70,7 +71,7 @@
           "兴趣",
           "偏好",
           "目标",
-          "技能",
+          "职业",
           "位置"
         ],
         "top1_hit": true,
@@ -81,21 +82,21 @@
         "query": "用户用什么工具部署？",
         "expect_category": "工具",
         "top5_categories": [
-          "工具",
           "目标",
           "学习",
           "位置",
+          "工具",
           "工具"
         ],
-        "top1_hit": true,
-        "top3_hit": true,
+        "top1_hit": false,
+        "top3_hit": false,
         "top5_hit": true
       },
       {
         "query": "用户的学习方向？",
         "expect_category": "学习",
         "top5_categories": [
-          "技能",
+          "职业",
           "目标",
           "学习",
           "位置",
@@ -111,13 +112,13 @@
         "top5_categories": [
           "位置",
           "目标",
-          "技能",
+          "职业",
           "兴趣",
           "技能"
         ],
         "top1_hit": false,
-        "top3_hit": false,
-        "top5_hit": false
+        "top3_hit": true,
+        "top5_hit": true
       },
       {
         "query": "用户有什么使用偏好？",
@@ -139,8 +140,8 @@
         "top5_categories": [
           "偏好",
           "偏好",
-          "目标",
           "兴趣",
+          "目标",
           "习惯"
         ],
         "top1_hit": false,
@@ -156,7 +157,7 @@
     "top_results": [
       "用户偏好深色主题界面，并重视代码可读性",
       "用户长期偏好喜欢喝拿铁咖啡",
-      "用户对 AI 产品化以及 Agent 的落地场景感兴趣"
+      "用户对 AI 产品化、Agent 落地场景感兴趣"
     ]
   },
   {
