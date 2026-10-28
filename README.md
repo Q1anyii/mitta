@@ -1,6 +1,6 @@
 # Mitta AI 智能助理（米塔）
 
-面向自定义知识库的 AI 智能助理：基于 **LangGraph + RAG + MCP + 流式 SSE**，内置完整检索链路（查询改写 → 多路召回 → RRF 融合 → 在线重排），支持短期记忆（多轮对话恢复）与长期记忆（用户档案）、MCP 工具调用（文件系统/数据库/网页抓取等）、知识库增量入库，并通过 SSE 流式输出实现打字机效果。已上线公网（HTTPS）并提供 Tauri 桌面端。
+面向自定义知识库的 AI 智能助理：基于 **LangGraph + RAG + MCP + 流式 SSE**，内置完整检索链路（查询改写 → 多路召回 → RRF 融合 → 在线重排），支持三层记忆（短期会话 checkpoint / 用户名低频档案 / mem0 检索式长期事实，叠加+乘性时间衰减+90 天 TTL）、MCP 工具调用（文件系统/数据库/网页抓取等）、知识库增量入库，并通过 SSE 流式输出实现打字机效果。已上线公网（HTTPS）并提供 Tauri 桌面端。
 
 ## UI 演示
 
@@ -60,7 +60,7 @@ docker-compose up -d
 | LLM | LangChain 1.x + DeepSeek（deepseek-flash = V4.1-Flash，OpenAI 兼容，支持 reasoning_content） |
 | Embedding / 重排 | SiliconFlow `BAAI/bge-m3`（1024 维）/ `BAAI/bge-reranker-v2-m3` |
 | 向量库 | ChromaDB（默认，免部署）/ Milvus（可插拔） |
-| 存储 | PostgreSQL 16（记忆 + 用户表）、Redis 7（缓存 + RedisSearch BM25 + 限流 + 登录态） |
+| 存储 | PostgreSQL 16（会话 checkpoint + 用户表）、Redis 7（缓存 + RedisSearch BM25 + 限流 + 登录态 + mem0 记忆库可选后端）、ChromaDB（mem0 默认本地向量库） |
 | MCP | MCP Python SDK + FastMCP（内置 agent_server + 外部 stdio/sse 服务器） |
 | Web | FastAPI + Uvicorn（SSE 流式）+ Nginx（静态托管 + API 代理） |
 | 前端 | Vue 3 运行时（CDN，无构建工具 / 无 SFC）+ 手写设计系统 + 多主题 + 响应式 |
@@ -68,7 +68,7 @@ docker-compose up -d
 
 ## 功能特性
 
-统一意图路由 · 多人格路由（4 人格 + 工具白名单 + chibi 吐槽）· RAG 混合检索 · MCP 工具集成（分组 + 懒加载）· 智能工具筛选 · 双通道记忆（短期/长期）· 检索缓存四层（LSH + KNN + rerank，TTL 抖动 + singleflight 防雪崩）· 流式 SSE + ack 预响应 · 断点续传 · 文件上传解析 · 知识库增量更新 API · 用户级 MCP 热重载 · 深度思考 · 安全认证。完整逐条说明见 [docs/FEATURES.md](docs/FEATURES.md)。
+统一意图路由 · 多人格路由（4 人格 + 工具白名单 + chibi 吐槽）· RAG 混合检索 · MCP 工具集成（分组 + 懒加载）· 智能工具筛选 · 三层记忆（会话 checkpoint / PG 用户档案 / mem0 检索式长期事实）· 检索缓存四层（LSH + KNN + rerank，TTL 抖动 + singleflight 防雪崩）· 流式 SSE + ack 预响应 · 断点续传 · 文件上传解析 · 知识库增量更新 API · 用户级 MCP 热重载 · 深度思考 · 安全认证。完整逐条说明见 [docs/FEATURES.md](docs/FEATURES.md)。
 
 ## 文档
 

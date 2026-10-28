@@ -1,7 +1,7 @@
 # mem0 记忆改造（P2 写路径 + P3 读路径 + P4 redis 后端）：store 全量合并 → mem0 增量入库 + 检索注入
 
 日期：2026-10-27
-docs_sync: required
+docs_sync: none（已同步 2026-10-28：05 篇整体重写为三层记忆/索引 README L16+L43+L160 口径/简历 Bullet B4 节+L25+L113+L612/根 README L3+L63+L71/Wiki 双层记忆页+核心指标记忆节+Sidebar）
 
 ## 背景
 
