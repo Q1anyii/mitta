@@ -96,6 +96,9 @@ jobs:
       # ========== 阶段 1.6：判断是否需要 RAG 入库（蓝绿切换，H-20260919-08） ==========
       # 命中入库相关文件 → ingest_required=true，CI 执行蓝绿入库；
       # 否则跳过（普通业务代码改动不触发入库，不花 embedding API 费用）
+      # 当前存在缺陷：只diff最近一次提交，
+      # 优化方向：并入Check if image build is required，
+      # 对齐build_required读取LAST_INGEST_SHA,同时在入库成功后写入Github
       - name: Check if RAG ingest is required
         id: ingest
         run: |
