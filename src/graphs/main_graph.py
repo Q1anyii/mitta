@@ -19,7 +19,6 @@ from functools import partial
 
 from langchain_core.tools import BaseTool
 from langchain_core.tools.base import ToolException
-from langgraph.types import CachePolicy
 from langgraph.store.base import BaseStore
 from langgraph.constants import START, END
 from langgraph.graph.state import StateGraph
@@ -59,9 +58,8 @@ from graphs.tool_filter import ToolFilter
 from graphs.nodes.router_node import router_node
 from graphs.nodes.retrieve_node import retrieve_node
 from graphs.nodes.llm_node import llm_node
-from graphs.nodes.memory_node import memory_node, _memory_cache_key
+from graphs.nodes.memory_node import memory_node
 from graphs.routes import route, route_after_llm
-from constant.cache_constant import CACHE_MEMORY_NODE_TTL
 from service.memory_service import get_memory_service
 
 
@@ -161,14 +159,11 @@ def build_main_graph(
     # ToolMessage（携带旧 tool_call_id），与当前轮 AI 消息的新 tool_calls id 不匹配，
     # 透传给 API 会双向 400（悬空调用 / 孤儿 ToolMessage）
     builder.add_node("tool_node", tool_node)
-    # memory_node：仅 executed/unavailable 轮写入缓存（见 _memory_cache_key），
-    # 命中时跳过节点执行（省一次 mem0 提取调用）。节点内部已 fire-and-forget
-    # （mem0.add 放后台线程），节点函数立即返回，SSE 完成态不被 1~3s 的提取阻塞。
-    builder.add_node(
-        "memory_node",
-        memory_node_bound,
-        cache_policy=CachePolicy(ttl=CACHE_MEMORY_NODE_TTL, key_func=_memory_cache_key),
-    )
+    # memory_node：不做节点级缓存。节点本身无 state 写入，CachePolicy 只能缓存
+    # __no_writes__；且 mem0.add 是 fire-and-forget 的副作用，节点级缓存无法按
+    # user/thread 隔离，误命中会直接跳过记忆写入。重复事实交给 mem0 的 hash 去重。
+    # 节点内部已 fire-and-forget（mem0.add 放后台线程），SSE 完成态不被提取阻塞。
+    builder.add_node("memory_node", memory_node_bound)
 
     builder.add_edge(START, "router_node")
     builder.add_conditional_edges(

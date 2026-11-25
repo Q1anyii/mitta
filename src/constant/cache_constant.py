@@ -30,10 +30,6 @@ CACHE_DEFAULT_TTL = 900
 # 落地的 Redis（见 chat_service.open）；短窗口去重重复检索，可按知识库更新频率调整
 CACHE_RETRIEVE_NODE_TTL = 10
 
-# memory_node 节点级缓存 TTL（秒）：仅当本轮工具被执行或执行失败（无工具可用）时写入，
-# idle 轮（筛选出工具但模型未调用）不缓存；命中时跳过 LLM 记忆提取与 store 写入
-CACHE_MEMORY_NODE_TTL = 10
-
 # 缓存命中验证阈值：向量初筛召回候选后，用 bge-reranker-v2-m3 验证候选问题与当前问题
 # 是否语义等价（实测同义改写 0.89+，无关问题 0.0，取 0.5 有充足间隔）
 CACHE_RERANK_HIT_SCORE = 0.5

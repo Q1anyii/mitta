@@ -3,13 +3,11 @@
 P2 改造：原「读全量档案 → LLM 合并 → store.put」整体替换为 mem0.add
 （mem0 内部完成事实提取 + embedding 入库，增量而非全量合并）。
 store 的 user_profile 稳定档案由 llm_node._ensure_username_profile 独占维护，
-本节点不再经手 store；_memory_cache_key 保留（同轮重放时跳过 mem0.add）。
+本节点不再经手 store。节点无 state 写入，不做节点级缓存；重复事实由 mem0
+的 hash 去重兜底。
 依赖：memory_service（Mem0 适配层，依赖注入）。
 """
 
-import uuid
-
-from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
 from concurrent.futures.thread import ThreadPoolExecutor
@@ -18,34 +16,6 @@ from graphs.state import OverAllState
 
 # 实例化线程池，限制最大并发8个后台任务，防止线程爆炸
 executor = ThreadPoolExecutor(max_workers=8)
-
-
-def _memory_cache_key(state: dict) -> str:
-    """memory_node 缓存键计算函数（LangGraph CachePolicy.key_func）。
-
-    仅当本轮工具被执行（executed）或执行失败/无工具可用（unavailable）
-    时返回确定性 key（可命中）；idle 轮（筛选出工具但模型未调用）返回随机键，永不命中、
-    不与其他轮次共享缓存。key 含消息轮次（len(msgs)）与最后一条 AI 内容，
-    避免跨轮同文误命中导致 mem0 记忆写入被跳过；命中时跳过 memory_node 执行
-    （省一次 mem0 提取调用，仅限 TTL 内同轮重复到达）。
-
-    Args:
-        state: 图状态 dict
-
-    Returns:
-        缓存键字符串
-    """
-    if not isinstance(state, dict):
-        return f"nocache-{uuid.uuid4().hex}"
-    if state.get("tool_status") not in ("executed", "unavailable"):
-        return f"nocache-{uuid.uuid4().hex}"
-    msgs = state.get("messages", []) if isinstance(state.get("messages", []), list) else []
-    last_ai = ""
-    for m in reversed(msgs):
-        if isinstance(m, AIMessage) and m.content:
-            last_ai = m.content if isinstance(m.content, str) else str(m.content)
-            break
-    return f"{len(msgs)}|{state.get('input_str', '')}|{last_ai}"
 
 
 def memory_node(state: OverAllState, config: RunnableConfig, memory_service) -> None:

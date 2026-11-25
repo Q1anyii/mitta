@@ -1,6 +1,6 @@
 # ============================================================
 # Agent 系统回归测试（评测矩阵 E14）
-# 覆盖：动态路由 / MCP 安全校验 / 工具异常兜底 / 记忆缓存 key / 工具名解析
+# 覆盖：动态路由 / MCP 安全校验 / 工具异常兜底 / 工具名解析
 # 运行：pytest tests/test_agent_regression.py -v
 # 说明：全部为纯函数/无外部依赖用例，可进 CI（RAGAS 评测不进 CI）。
 # ============================================================
@@ -13,11 +13,10 @@ import pytest
 # 添加 src 到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage
 from langgraph.types import Send
 
 from graphs.routes import route, route_after_llm
-from graphs.nodes.memory_node import _memory_cache_key
 from service.mcp_config_service import validate_mcp_server_config
 from graphs.main_graph import _tool_error_message
 from utils.tools_util import parse_tool_names, safety_filter
@@ -123,33 +122,6 @@ class TestToolErrorFallback:
         msg = _tool_error_message(ToolException("path is a file, ENOTDIR"))
         assert "必须是目录" in msg
         assert "read_file" in msg
-
-
-# ============================================================
-# E6 记忆缓存 key
-# ============================================================
-
-class TestMemoryCacheKey:
-    def test_idle_never_cached(self):
-        """idle 轮返回随机 key，永不命中。"""
-        k1 = _memory_cache_key({"tool_status": "idle", "messages": [], "input_str": "hi"})
-        k2 = _memory_cache_key({"tool_status": "idle", "messages": [], "input_str": "hi"})
-        assert k1.startswith("nocache-")
-        assert k1 != k2
-
-    def test_executed_deterministic(self):
-        """executed 轮返回确定性 key（同轮可命中）。"""
-        state = {"tool_status": "executed", "messages": [AIMessage(content="ok")], "input_str": "q"}
-        k1 = _memory_cache_key(state)
-        k2 = _memory_cache_key(state)
-        assert k1 == k2
-        assert not k1.startswith("nocache-")
-
-    def test_key_includes_round(self):
-        """key 含消息轮次，跨轮不误命中。"""
-        state1 = {"tool_status": "executed", "messages": [AIMessage(content="a")], "input_str": "q"}
-        state2 = {"tool_status": "executed", "messages": [AIMessage(content="a"), ToolMessage(content="r", tool_call_id="1")], "input_str": "q"}
-        assert _memory_cache_key(state1) != _memory_cache_key(state2)
 
 
 # ============================================================
